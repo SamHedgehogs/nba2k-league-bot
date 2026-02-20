@@ -7,7 +7,7 @@ import urllib.request
 import asyncio
 
 # URL Apps Script (web app, accesso: Chiunque)
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxU7vLSn0dZuVVfZTO9M6Ynl5MuXQPwcMJNFnHX2HbhZM_VzBQGHtVSZ4nVw1kVZ5eE/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwuJkvPsNo_QLRrPTwo-H6Lm79xm0n56ukoVpAsUjHzZlQq62GoSLqZh5LVkJCkT0KS/exec"
 
 # Mapping nickname -> parola chiave nel nome squadra del Sheet (MAIUSCOLO)
 TEAM_ALIASES = {
