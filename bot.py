@@ -6,7 +6,7 @@ import json
 import urllib.request
 import asyncio
 
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbaA9lYeGxH_lwbarUuFjXJyi7xZiBOrNoemuZSiSm7bFiRpyJPVh9KNhtThR9yerQjF/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzVqbuwreLosa2ppL3sK8bUGAxAHFBdqZxbGq5Qru-mgV6_ducAFDWK25JoVN4DB_NT/exec"
 
 TEAM_ALIASES = {
     "hawks": "HAWKS", "celtics": "CELTICS", "nets": "NETS",
