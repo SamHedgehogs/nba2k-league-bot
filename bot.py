@@ -4,7 +4,18 @@ from discord.ext import commands
 from discord import app_commands
 import json
 
-# Caricamento database (semplice file JSON per ora)
+# Lista delle 30 franchigie NBA reali
+FRANCHIGIE_NBA = [
+    "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets",
+    "Chicago Bulls", "Cleveland Cavaliers", "Detroit Pistons", "Indiana Pacers",
+    "Miami Heat", "Milwaukee Bucks", "New York Knicks", "Orlando Magic",
+    "Philadelphia 76ers", "Toronto Raptors", "Washington Wizards",
+    "Dallas Mavericks", "Denver Nuggets", "Golden State Warriors", "Houston Rockets",
+    "LA Clippers", "Los Angeles Lakers", "Memphis Grizzlies", "Minnesota Timberwolves",
+    "New Orleans Pelicans", "Oklahoma City Thunder", "Phoenix Suns",
+    "Portland Trail Blazers", "Sacramento Kings", "San Antonio Spurs", "Utah Jazz"
+]
+
 def load_db():
     try:
         with open('league_db.json', 'r') as f:
@@ -34,16 +45,60 @@ async def on_ready():
     print(f'Lega NBA 2K Online! Loggato come {bot.user}')
 
 # --- REGISTRA TEAM ---
-@bot.tree.command(name="registra_team", description="Registra la tua squadra NBA 2K")
+@bot.tree.command(name="registra_team", description="Registra la tua franchigia NBA 2K")
 async def registra_team(interaction: discord.Interaction, nome_squadra: str):
     db = load_db()
     user_id = str(interaction.user.id)
+
+    # Controlla se l'utente ha gia' una squadra
     if user_id in db["teams"]:
-        await interaction.response.send_message(f"Hai già registrato i {db['teams'][user_id]['nome']}!", ephemeral=True)
+        await interaction.response.send_message(f"Hai gia' registrato i **{db['teams'][user_id]['nome']}**!", ephemeral=True)
         return
-            db["teams"][user_id] = {"nome": nome_squadra, "cap_space": 160, "roster": []}
+
+    # Controlla che il nome sia una franchigia NBA reale
+    franchige_lower = [f.lower() for f in FRANCHIGIE_NBA]
+    if nome_squadra.lower() not in franchige_lower:
+        lista = "\n".join(FRANCHIGIE_NBA)
+        await interaction.response.send_message(
+            f"**{nome_squadra}** non e' una franchigia NBA valida!\n\nFranchigie disponibili:\n{lista}",
+            ephemeral=True
+        )
+        return
+
+    # Trova il nome con la maiuscola corretta
+    nome_ufficiale = FRANCHIGIE_NBA[franchige_lower.index(nome_squadra.lower())]
+
+    # Controlla che la franchigia non sia gia' presa
+    franchigie_prese = [t["nome"] for t in db["teams"].values()]
+    if nome_ufficiale in franchigie_prese:
+        await interaction.response.send_message(
+            f"I **{nome_ufficiale}** sono gia' stati scelti da un altro utente!",
+            ephemeral=True
+        )
+        return
+
+    db["teams"][user_id] = {"nome": nome_ufficiale, "cap_space": 160, "roster": []}
     save_db(db)
-    await interaction.response.send_message(f"Squadra **{nome_squadra}** registrata con successo!")
+    await interaction.response.send_message(f"Franchigia **{nome_ufficiale}** registrata con successo!")
+
+# --- FRANCHIGIE DISPONIBILI ---
+@bot.tree.command(name="franchigie", description="Mostra le franchigie NBA ancora disponibili")
+async def franchigie(interaction: discord.Interaction):
+    db = load_db()
+    prese = [t["nome"] for t in db["teams"].values()]
+    disponibili = [f for f in FRANCHIGIE_NBA if f not in prese]
+
+    if not disponibili:
+        await interaction.response.send_message("Tutte le 30 franchigie sono state assegnate!")
+        return
+
+    lista = "\n".join([f"- {f}" for f in disponibili])
+    embed = discord.Embed(
+        title=f"Franchigie disponibili ({len(disponibili)}/30)",
+        description=lista,
+        color=discord.Color.gold()
+    )
+    await interaction.response.send_message(embed=embed)
 
 # --- INFO TEAM ---
 @bot.tree.command(name="team", description="Mostra info sulla tua squadra")
@@ -71,14 +126,13 @@ async def roster(interaction: discord.Interaction, utente: discord.Member = None
     team = db["teams"][user_id]
     players = team["roster"]
     if not players:
-        await interaction.response.send_message(f"Il roster dei **{team['nome']}** è vuoto.")
+        await interaction.response.send_message(f"Il roster dei **{team['nome']}** e' vuoto.")
         return
-    desc = "
-".join([f"🏀 {p['nome']} - ${p['stipendio']}M" for p in players])
+    desc = "\n".join([f"\U0001f3c0 {p['nome']} - ${p['stipendio']}M" for p in players])
     embed = discord.Embed(title=f"Roster: {team['nome']}", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
 
-# --- FIRMA FREE AGENT (ADMIN/TEMP) ---
+# --- FIRMA FREE AGENT ---
 @bot.tree.command(name="firma_fa", description="Firma un giocatore free agent")
 async def firma_fa(interaction: discord.Interaction, nome: str, stipendio: int):
     db = load_db()
@@ -106,7 +160,7 @@ async def taglia(interaction: discord.Interaction, nome_giocatore: str):
     team = db["teams"][user_id]
     player = next((p for p in team["roster"] if p["nome"].lower() == nome_giocatore.lower()), None)
     if not player:
-        await interaction.response.send_message(f"Giocatore {nome_giocatore} non trovato nel roster.", ephemeral=True)
+        await interaction.response.send_message(f"Giocatore **{nome_giocatore}** non trovato nel roster.", ephemeral=True)
         return
     team["roster"].remove(player)
     team["cap_space"] += player["stipendio"]
@@ -127,10 +181,10 @@ async def proponi_trade(interaction: discord.Interaction, utente_avversario: dis
     p_a = next((p for p in team_a["roster"] if p["nome"].lower() == mio_giocatore.lower()), None)
     p_b = next((p for p in team_b["roster"] if p["nome"].lower() == giocatore_avversario.lower()), None)
     if not p_a:
-        await interaction.response.send_message(f"**{mio_giocatore}** non è nel tuo roster!", ephemeral=True)
+        await interaction.response.send_message(f"**{mio_giocatore}** non e' nel tuo roster!", ephemeral=True)
         return
     if not p_b:
-        await interaction.response.send_message(f"**{giocatore_avversario}** non è nel roster di {team_b['nome']}!", ephemeral=True)
+        await interaction.response.send_message(f"**{giocatore_avversario}** non e' nel roster di {team_b['nome']}!", ephemeral=True)
         return
     db["trades"].append({"da": user_id, "a": target_id, "giocatore_da": p_a["nome"], "giocatore_a": p_b["nome"], "stato": "in attesa"})
     save_db(db)
@@ -154,7 +208,7 @@ async def accetta_trade(interaction: discord.Interaction):
     p_a = next((p for p in team_a["roster"] if p["nome"] == trade["giocatore_da"]), None)
     p_b = next((p for p in team_b["roster"] if p["nome"] == trade["giocatore_a"]), None)
     if not p_a or not p_b:
-        await interaction.response.send_message("Errore: uno dei giocatori non è più disponibile.", ephemeral=True)
+        await interaction.response.send_message("Errore: uno dei giocatori non e' piu' disponibile.", ephemeral=True)
         return
     team_a["roster"].remove(p_a)
     team_b["roster"].remove(p_b)
