@@ -57,7 +57,7 @@ def _fetch_sync():
     req = urllib.request.Request(APPS_SCRIPT_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read().decode("utf-8")
-    return json.loads(raw)
+        return json.loads(raw)
 
 async def fetch_sheet_data():
     loop = asyncio.get_event_loop()
@@ -124,11 +124,12 @@ async def roster(interaction: discord.Interaction, squadra: str):
     players = team_info.get("roster", [])
     discord_user = team_info.get("discord_user", "")
     nome_squadra = team_info.get("squadra", team_key)
+
     sorted_players = sorted(players, key=lambda x: x.get("overall", 0), reverse=True)
 
     def safe_sum(key):
         return sum(
-            (p.get(key) or 0) for p in players
+            (p.get(key) or 0) for p in players 
             if p.get(key) not in ("RFA", None, 0, "")
         )
 
@@ -137,24 +138,22 @@ async def roster(interaction: discord.Interaction, squadra: str):
     sal28 = safe_sum("stipendio_2k28")
 
     def cell(v):
-        if v == "RFA":
-            return "RFA"
-        if not v or v == 0:
-            return "-"
+        if v == "RFA": return "RFA"
+        if not v or v == 0: return "-"
         return f"${v}M"
 
     lines = []
     lines.append(f"{'#':<3} {'GIOCATORE':<22} {'OVR':<5} {'2K26':>7} {'2K27':>7} {'2K28':>7}")
     lines.append("-" * 54)
     for i, p in enumerate(sorted_players, 1):
-        nome = p.get("nome", "???")
-        if len(nome) > 21:
-            nome = nome[:19] + ".."
+        p_nome = p.get("nome", "???")
+        if len(p_nome) > 21:
+            p_nome = p_nome[:19] + ".."
         ovr = p.get("overall", 0)
         s26 = p.get("stipendio_2k26", 0)
         s27 = p.get("stipendio_2k27", 0)
         s28 = p.get("stipendio_2k28", 0)
-        lines.append(f"{i:<3} {nome:<22} {ovr:<5} {cell(s26):>7} {cell(s27):>7} {cell(s28):>7}")
+        lines.append(f"{i:<3} {p_nome:<22} {ovr:<5} {cell(s26):>7} {cell(s27):>7} {cell(s28):>7}")
 
     table = "```\n" + "\n".join(lines) + "\n```"
 
@@ -172,17 +171,20 @@ async def roster(interaction: discord.Interaction, squadra: str):
     )
     if discord_user:
         embed.add_field(name="\U0001f464 GM", value=f"`{discord_user}`", inline=True)
+    
     top8 = sorted_players[:8]
     if top8:
         avg_ovr = round(sum(p.get("overall", 0) for p in top8) / len(top8), 1)
         embed.add_field(name="\u2b50 OVR medio Top 8", value=f"`{avg_ovr}`", inline=True)
+
     embed.add_field(name="\u200b", value="\u200b", inline=False)
     embed.add_field(name="\U0001f4b0 Salary 2K26", value=sal_bar(sal26), inline=False)
     if sal27 > 0:
         embed.add_field(name="\U0001f4b0 Salary 2K27", value=sal_bar(sal27), inline=False)
     if sal28 > 0:
         embed.add_field(name="\U0001f4b0 Salary 2K28", value=sal_bar(sal28), inline=False)
-    embed.set_footer(text=f"Cap: ${CAP}M  |  Luxury Tax: ${LUX_TAX}M  |  Verde=OK  Giallo=Over cap  Rosso=Luxury tax")
+
+    embed.set_footer(text=f"Cap: ${CAP}M | Luxury Tax: ${LUX_TAX}M | Verde=OK Giallo=Over cap Rosso=Luxury tax")
     await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="init_league", description="Ricarica i dati dal Google Sheet")
@@ -202,28 +204,47 @@ async def init_league(interaction: discord.Interaction):
 async def crea_canali_team(interaction: discord.Interaction):
     await interaction.response.defer()
     guild = interaction.guild
+    
     try:
         all_data = await fetch_sheet_data()
         team_names = list(all_data.keys())
     except Exception:
         team_names = []
+
+    if not team_names:
+        await interaction.followup.send("Nessun dato trovato nel foglio Google.")
+        return
+
     category = discord.utils.get(guild.categories, name="FRANCHIGIE")
     if not category:
-        category = await guild.create_category("FRANCHIGIE")
-    created, skipped = [], []
-    for nome in team_names:
+        try:
+            category = await guild.create_category("FRANCHIGIE")
+        except discord.Forbidden:
+            await interaction.followup.send("Errore: Il bot non ha i permessi per creare categorie.")
+            return
+
+    existing_channels = {c.name: c for c in category.text_channels}
+    
+    async def create_one(nome):
         c_name = nome.lower().replace(" ", "-")
-        existing = discord.utils.get(category.text_channels, name=c_name)
-        if not existing:
-            await guild.create_text_channel(c_name, category=category)
-            created.append(c_name)
-        else:
-            skipped.append(c_name)
-    msg = "Canali pronti nella categoria **FRANCHIGIE**.\n"
-    if created:
-        msg += f"\u2705 Creati: {', '.join(created)}\n"
-    if skipped:
-        msg += f"\u23ed Gia esistenti: {', '.join(skipped)}"
+        if c_name not in existing_channels:
+            try:
+                await guild.create_text_channel(c_name, category=category)
+                return "OK"
+            except:
+                return "KO"
+        return "SKIP"
+
+    results = await asyncio.gather(*(create_one(n) for n in team_names))
+    
+    ok = results.count("OK")
+    skip = results.count("SKIP")
+    ko = results.count("KO")
+
+    msg = f"**Operazione Completata!**\nCreati: {ok}\nGià presenti: {skip}\nFalliti: {ko}"
+    if ko > 0:
+        msg += "\n\n*Controlla i permessi del bot (MANAGE_CHANNELS).*"
+    
     await interaction.followup.send(msg)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
