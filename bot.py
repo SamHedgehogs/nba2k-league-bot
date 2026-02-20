@@ -37,27 +37,25 @@ TEAM_ALIASES = {
     "atlanta": "HAWKS",
 }
 
+CAP = 225  # Salary cap
+LUX_TAX = 275  # Luxury tax threshold
+
 def find_team_in_data(query: str, data: dict):
-    """Cerca la squadra nel dizionario dati. Ritorna (key, team_data) o (None, None)."""
     q = query.strip().lower()
-    # 1. Match esatto
     for key in data:
         if key.lower() == q:
             return key, data[key]
-    # 2. Via alias
     keyword = TEAM_ALIASES.get(q)
     if keyword:
         for key in data:
             if keyword in key.upper():
                 return key, data[key]
-    # 3. Partial match
     for key in data:
         if q in key.lower():
             return key, data[key]
     return None, None
 
 def _fetch_sync():
-    """Scarica i dati dal Google Sheet via Apps Script (sincrono, usa urllib)."""
     req = urllib.request.Request(
         APPS_SCRIPT_URL,
         headers={"User-Agent": "Mozilla/5.0"}
@@ -67,7 +65,6 @@ def _fetch_sync():
     return json.loads(raw)
 
 async def fetch_sheet_data():
-    """Wrapper asincrono per _fetch_sync."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _fetch_sync)
 
@@ -81,6 +78,27 @@ def load_db():
 def save_db(data):
     with open('league_db.json', 'w') as f:
         json.dump(data, f, indent=4)
+
+def fmt_sal(s):
+    """Formatta stipendio per la tabella monospace."""
+    if s == 'RFA':
+        return 'RFA  '
+    if not s or s == 0:
+        return 'FA   '
+    return f"{s}M  "
+
+def sal_bar(total, cap=CAP):
+    """Barra visiva del salary cap."""
+    pct = min(total / cap, 1.2)
+    filled = int(pct * 10)
+    bar = '█' * filled + '░' * (10 - min(filled, 10))
+    if total > LUX_TAX:
+        status = '🔴'
+    elif total > CAP:
+        status = '🟡'
+    else:
+        status = '🟢'
+    return f"{status} `{bar}` ${round(total, 1)}M / ${cap}M"
 
 class LeagueBot(commands.Bot):
     def __init__(self):
@@ -113,7 +131,7 @@ async def roster(interaction: discord.Interaction, squadra: str):
     team_key, team_info = find_team_in_data(squadra, all_data)
     if not team_info:
         await interaction.followup.send(
-            f"Squadra '{squadra}' non trovata. Prova con: Bucks, Sixers, Lakers, Celtics..."
+            f"Squadra **'{squadra}'** non trovata.\nProva con: `Bucks`, `Sixers`, `Lakers`, `Celtics`..."
         )
         return
 
@@ -121,48 +139,97 @@ async def roster(interaction: discord.Interaction, squadra: str):
     discord_user = team_info.get("discord_user", "")
     nome_squadra = team_info.get("squadra", team_key)
 
-    # Calcolo salary totale
-    sal26_tot = sum(p.get("stipendio_2k26", 0) or 0 for p in players if p.get("stipendio_2k26") != "RFA")
-    sal27_tot = sum(p.get("stipendio_2k27", 0) or 0 for p in players if p.get("stipendio_2k27") not in ("RFA", 0, None))
-    sal28_tot = sum(p.get("stipendio_2k28", 0) or 0 for p in players if p.get("stipendio_2k28") not in ("RFA", 0, None))
-    CAP = 225  # Salary cap in milioni
-
     sorted_players = sorted(players, key=lambda x: x.get('overall', 0), reverse=True)
 
-    def fmt_sal(s):
-        if s == 'RFA':
-            return 'RFA'
-        if not s:
-            return '-'
-        return f"${s}M"
+    # Calcolo totali salary
+    def safe_sum(year_key):
+        return sum(
+            (p.get(year_key) or 0)
+            for p in players
+            if p.get(year_key) not in ('RFA', None, 0, '')
+        )
 
-    desc_lines = []
-    for p in sorted_players:
-        nome = p.get('nome', 'Sconosciuto')
-        ovr = p.get('overall', '?')
+    sal26 = safe_sum('stipendio_2k26')
+    sal27 = safe_sum('stipendio_2k27')
+    sal28 = safe_sum('stipendio_2k28')
+
+    # --- Costruisce tabella monospace ---
+    # Header
+    lines = []
+    lines.append(f"{'#':<3} {'GIOCATORE':<22} {'OVR':<5} {'2K26':>7} {'2K27':>7} {'2K28':>7}")
+    lines.append("-" * 54)
+
+    for i, p in enumerate(sorted_players, 1):
+        nome = p.get('nome', '???')
+        # Tronca nomi lunghi
+        if len(nome) > 21:
+            nome = nome[:19] + '..''
+        ovr = p.get('overall', 0)
         s26 = p.get('stipendio_2k26', 0)
         s27 = p.get('stipendio_2k27', 0)
         s28 = p.get('stipendio_2k28', 0)
-        desc_lines.append(
-            f"**{nome}** (OVR {ovr}) | 2K26:{fmt_sal(s26)} 2K27:{fmt_sal(s27)} 2K28:{fmt_sal(s28)}"
+
+        def cell(v):
+            if v == 'RFA':
+                return 'RFA'
+            if not v or v == 0:
+                return '-'
+            return f"${v}M"
+
+        lines.append(
+            f"{i:<3} {nome:<22} {ovr:<5} {cell(s26):>7} {cell(s27):>7} {cell(s28):>7}"
         )
 
-    desc = "\n".join(desc_lines) if desc_lines else "Roster vuoto"
-    if len(desc) > 4000:
-        desc = desc[:4000] + "\n..."
+    table = "```\n" + "\n".join(lines) + "\n```"
+
+    # --- Embed ---
+    # Colore: verde se sotto cap, arancio se sopra, rosso se luxury tax
+    if sal26 > LUX_TAX:
+        color = 0xFF0000
+    elif sal26 > CAP:
+        color = 0xFF8C00
+    else:
+        color = 0x00C851
 
     embed = discord.Embed(
-        title=f"{nome_squadra}",
-        description=desc,
-        color=0x1E90FF
+        title=f"🏀 {nome_squadra}",
+        description=table,
+        color=color
     )
+
+    # GM
     if discord_user:
-        embed.add_field(name="GM", value=discord_user, inline=True)
-    embed.add_field(name="Salary 2K26", value=f"${round(sal26_tot,2)}M / ${CAP}M", inline=True)
-    if sal27_tot:
-        embed.add_field(name="Salary 2K27", value=f"${round(sal27_tot,2)}M / ${CAP}M", inline=True)
-    if sal28_tot:
-        embed.add_field(name="Salary 2K28", value=f"${round(sal28_tot,2)}M / ${CAP}M", inline=True)
+        embed.add_field(name="👤 GM", value=f"`{discord_user}`", inline=True)
+
+    # OVR medio top 8
+    top8 = sorted_players[:8]
+    if top8:
+        avg_ovr = round(sum(p.get('overall', 0) for p in top8) / len(top8), 1)
+        embed.add_field(name="⭐ OVR medio Top 8", value=f"`{avg_ovr}`", inline=True)
+
+    embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+    # Salary bars
+    embed.add_field(
+        name="💰 Salary 2K26",
+        value=sal_bar(sal26),
+        inline=False
+    )
+    if sal27 > 0:
+        embed.add_field(
+            name="💰 Salary 2K27",
+            value=sal_bar(sal27),
+            inline=False
+        )
+    if sal28 > 0:
+        embed.add_field(
+            name="💰 Salary 2K28",
+            value=sal_bar(sal28),
+            inline=False
+        )
+
+    embed.set_footer(text=f"Cap: ${CAP}M  |  Luxury Tax: ${LUX_TAX}M  |  🟢 Sotto cap  🟡 Over cap  🔴 Luxury tax")
+
     await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="init_league", description="Ricarica i dati dal Google Sheet e mostra le squadre trovate")
@@ -175,7 +242,7 @@ async def init_league(interaction: discord.Interaction):
         save_db(db)
         team_list = ", ".join(all_data.keys())
         await interaction.followup.send(
-            f"Dati lega caricati! {len(all_data)} squadre: {team_list}"
+            f"Dati lega caricati! **{len(all_data)} squadre**: {team_list}"
         )
     except Exception as e:
         await interaction.followup.send(f"Errore Apps Script: {e}")
@@ -204,11 +271,11 @@ async def crea_canali_team(interaction: discord.Interaction):
         else:
             skipped.append(c_name)
 
-    msg = f"Canali pronti nella categoria 'FRANCHIGIE'.\n"
+    msg = f"Canali pronti nella categoria **FRANCHIGIE**.\n"
     if created:
-        msg += f"Creati: {', '.join(created)}\n"
+        msg += f"✅ Creati: {', '.join(created)}\n"
     if skipped:
-        msg += f"Gia' esistenti: {', '.join(skipped)}"
+        msg += f"⏭️ Gia' esistenti: {', '.join(skipped)}"
     await interaction.followup.send(msg)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
