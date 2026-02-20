@@ -38,7 +38,6 @@ TEAM_ALIASES = {
 MIN_CAP = 130
 SAL_CAP = 160
 HARD_CAP = 200
-
 ADMIN_CHANNEL_NAME = "admin-league"
 MERCATO_CHANNEL_NAME = "mercato"
 
@@ -109,8 +108,11 @@ def create_roster_embed(team_key, team_info):
         row = f"{i:<2} {n:<18} {p.get('overall',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
         lines.append(row)
     
-    table_content = "\n.join(lines)
-    table = f"```\n{table_content}\n``"
+    table_content = "
+".join(lines)
+    table = f"```
+{table_content}
+```"
     
     color = 0xFF0000 if sal26 > HARD_CAP else (0xFF8C00 if sal26 > SAL_CAP else 0x00FF00)
     embed = discord.Embed(title=f"🏀 {nome_squadra}", description=table, color=color)
@@ -252,7 +254,7 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
         async def deny(self, b_int, button):
             await b_int.response.send_message("Trade rifiutata.")
             self.stop()
-            
+    
     await admin_ch.send(embed=embed, view=TradeView())
     await interaction.followup.send("Proposta di trade inviata agli admin!")
 
