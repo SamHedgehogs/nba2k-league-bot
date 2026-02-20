@@ -3,108 +3,66 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import json
-import aiohttp
+import urllib.request
+import asyncio
 
-# URL Apps Script
+# URL Apps Script (web app, accesso: Chiunque)
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxU7vLSn0dZuVVfZTO9M6Ynl5MuXQPwcMJNFnHX2HbhZM_VzBQGHtVSZ4nVw1kVZ5eE/exec"
 
-# Mapping nickname -> parola chiave da cercare nel nome squadra del Sheet (tutto MAIUSCOLO)
+# Mapping nickname -> parola chiave nel nome squadra del Sheet (MAIUSCOLO)
 TEAM_ALIASES = {
-    "hawks": "HAWKS",
-    "celtics": "CELTICS",
-    "nets": "NETS",
-    "hornets": "HORNETS",
-    "bulls": "BULLS",
-    "cavaliers": "CAVALIERS",
-    "cavs": "CAVALIERS",
-    "pistons": "PISTONS",
-    "pacers": "PACERS",
-    "heat": "HEAT",
-    "bucks": "BUCKS",
-    "knicks": "KNICKS",
-    "magic": "MAGIC",
-    "sixers": "76ERS",
-    "76ers": "76ERS",
-    "philadelphia": "76ERS",
-    "raptors": "RAPTORS",
-    "wizards": "WIZARDS",
-    "washington": "WIZARDS",
-    "mavericks": "MAVERICKS",
-    "mavs": "MAVERICKS",
-    "nuggets": "NUGGETS",
-    "warriors": "WARRIORS",
-    "rockets": "ROCKETS",
-    "clippers": "CLIPPERS",
-    "lakers": "LAKERS",
-    "grizzlies": "GRIZZLIES",
-    "timberwolves": "TIMBERWOLVES",
-    "wolves": "TIMBERWOLVES",
-    "pelicans": "PELICANS",
-    "thunder": "THUNDER",
-    "okc": "THUNDER",
-    "suns": "SUNS",
-    "trail blazers": "BLAZERS",
-    "blazers": "BLAZERS",
-    "kings": "KINGS",
-    "spurs": "SPURS",
-    "jazz": "JAZZ",
-    "milwaukee": "BUCKS",
-    "boston": "CELTICS",
-    "brooklyn": "NETS",
-    "charlotte": "HORNETS",
-    "chicago": "BULLS",
-    "cleveland": "CAVALIERS",
-    "detroit": "PISTONS",
-    "indiana": "PACERS",
-    "miami": "HEAT",
-    "new york": "KNICKS",
-    "orlando": "MAGIC",
-    "toronto": "RAPTORS",
-    "dallas": "MAVERICKS",
-    "denver": "NUGGETS",
-    "golden state": "WARRIORS",
-    "houston": "ROCKETS",
-    "los angeles clippers": "CLIPPERS",
-    "los angeles lakers": "LAKERS",
-    "memphis": "GRIZZLIES",
-    "minnesota": "TIMBERWOLVES",
-    "new orleans": "PELICANS",
-    "oklahoma": "THUNDER",
-    "phoenix": "SUNS",
-    "portland": "BLAZERS",
-    "sacramento": "KINGS",
-    "san antonio": "SPURS",
-    "utah": "JAZZ",
-    "atlanta": "HAWKS",
+    "hawks": "HAWKS", "celtics": "CELTICS", "nets": "NETS",
+    "hornets": "HORNETS", "bulls": "BULLS", "cavaliers": "CAVALIERS",
+    "cavs": "CAVALIERS", "pistons": "PISTONS", "pacers": "PACERS",
+    "heat": "HEAT", "bucks": "BUCKS", "knicks": "KNICKS",
+    "magic": "MAGIC", "sixers": "76ERS", "76ers": "76ERS",
+    "philadelphia": "76ERS", "raptors": "RAPTORS", "wizards": "WIZARDS",
+    "washington": "WIZARDS", "mavericks": "MAVERICKS", "mavs": "MAVERICKS",
+    "nuggets": "NUGGETS", "warriors": "WARRIORS", "rockets": "ROCKETS",
+    "clippers": "CLIPPERS", "lakers": "LAKERS", "grizzlies": "GRIZZLIES",
+    "timberwolves": "TIMBERWOLVES", "wolves": "TIMBERWOLVES",
+    "pelicans": "PELICANS", "thunder": "THUNDER", "okc": "THUNDER",
+    "suns": "SUNS", "trail blazers": "BLAZERS", "blazers": "BLAZERS",
+    "kings": "KINGS", "spurs": "SPURS", "jazz": "JAZZ",
+    "milwaukee": "BUCKS", "boston": "CELTICS", "brooklyn": "NETS",
+    "charlotte": "HORNETS", "chicago": "BULLS", "cleveland": "CAVALIERS",
+    "detroit": "PISTONS", "indiana": "PACERS", "miami": "HEAT",
+    "new york": "KNICKS", "orlando": "MAGIC", "toronto": "RAPTORS",
+    "dallas": "MAVERICKS", "denver": "NUGGETS", "golden state": "WARRIORS",
+    "houston": "ROCKETS", "memphis": "GRIZZLIES", "minnesota": "TIMBERWOLVES",
+    "new orleans": "PELICANS", "oklahoma": "THUNDER", "phoenix": "SUNS",
+    "portland": "BLAZERS", "sacramento": "KINGS", "san antonio": "SPURS",
+    "utah": "JAZZ", "atlanta": "HAWKS",
 }
 
 def find_team_in_data(query: str, data: dict):
-    """Cerca la squadra nel dizionario dati. Ritorna (key, team_data) o (None, None)."""
     q = query.strip().lower()
-    # 1. Match esatto
     for key in data:
         if key.lower() == q:
             return key, data[key]
-    # 2. Via alias
     keyword = TEAM_ALIASES.get(q)
     if keyword:
         for key in data:
             if keyword in key.upper():
                 return key, data[key]
-    # 3. Partial match
     for key in data:
         if q in key.lower():
             return key, data[key]
     return None, None
 
+def _fetch_sync(url):
+    """Fetch sincrono con urllib (gestisce redirect automaticamente)."""
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (compatible; NBA2KBot/1.0)'
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode('utf-8')
+        return json.loads(raw)
+
 async def fetch_sheet_data():
-    """Scarica i dati dal Google Sheet via Apps Script. Gestisce redirect."""
-    connector = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.get(APPS_SCRIPT_URL, allow_redirects=True) as resp:
-            if resp.status != 200:
-                raise Exception(f"Status {resp.status}")
-            return await resp.json(content_type=None)
+    """Scarica i dati dal Google Sheet in modo asincrono."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_sync, APPS_SCRIPT_URL)
 
 def load_db():
     try:
@@ -156,20 +114,16 @@ async def roster(interaction: discord.Interaction, squadra: str):
     discord_user = team_info.get("discord_user", "")
     nome_squadra = team_info.get("squadra", team_key)
 
-    # Calcolo salary totale
     sal26_tot = sum(p.get("stipendio_2k26", 0) or 0 for p in players if p.get("stipendio_2k26") != "RFA")
     sal27_tot = sum(p.get("stipendio_2k27", 0) or 0 for p in players if p.get("stipendio_2k27") not in ("RFA", 0, None))
     sal28_tot = sum(p.get("stipendio_2k28", 0) or 0 for p in players if p.get("stipendio_2k28") not in ("RFA", 0, None))
-
-    CAP = 225  # Salary cap in milioni
+    CAP = 225
 
     sorted_players = sorted(players, key=lambda x: x.get('overall', 0), reverse=True)
 
     def fmt_sal(s):
-        if s == 'RFA':
-            return 'RFA'
-        if not s:
-            return '-'
+        if s == 'RFA': return 'RFA'
+        if not s: return '-'
         return f"${s}M"
 
     desc_lines = []
@@ -179,20 +133,13 @@ async def roster(interaction: discord.Interaction, squadra: str):
         s26 = p.get('stipendio_2k26', 0)
         s27 = p.get('stipendio_2k27', 0)
         s28 = p.get('stipendio_2k28', 0)
-        desc_lines.append(
-            f"**{nome}** (OVR {ovr}) | 2K26:{fmt_sal(s26)} 2K27:{fmt_sal(s27)} 2K28:{fmt_sal(s28)}"
-        )
+        desc_lines.append(f"**{nome}** (OVR {ovr}) | 2K26:{fmt_sal(s26)} 2K27:{fmt_sal(s27)} 2K28:{fmt_sal(s28)}")
 
     desc = "\n".join(desc_lines) if desc_lines else "Roster vuoto"
-
     if len(desc) > 4000:
         desc = desc[:4000] + "\n..."
 
-    embed = discord.Embed(
-        title=f"{nome_squadra}",
-        description=desc,
-        color=0x1E90FF
-    )
+    embed = discord.Embed(title=nome_squadra, description=desc, color=0x1E90FF)
     if discord_user:
         embed.add_field(name="GM", value=discord_user, inline=True)
     embed.add_field(name="Salary 2K26", value=f"${round(sal26_tot,2)}M / ${CAP}M", inline=True)
@@ -203,7 +150,7 @@ async def roster(interaction: discord.Interaction, squadra: str):
 
     await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="init_league", description="Ricarica i dati dal Google Sheet e mostra le squadre trovate")
+@bot.tree.command(name="init_league", description="Ricarica i dati dal Google Sheet")
 async def init_league(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
@@ -212,9 +159,7 @@ async def init_league(interaction: discord.Interaction):
         db["reali"] = all_data
         save_db(db)
         team_list = ", ".join(all_data.keys())
-        await interaction.followup.send(
-            f"Dati lega caricati! {len(all_data)} squadre: {team_list}"
-        )
+        await interaction.followup.send(f"Dati lega caricati! {len(all_data)} squadre: {team_list}")
     except Exception as e:
         await interaction.followup.send(f"Errore Apps Script: {e}")
 
@@ -232,8 +177,7 @@ async def crea_canali_team(interaction: discord.Interaction):
     if not category:
         category = await guild.create_category("FRANCHIGIE")
 
-    created = []
-    skipped = []
+    created, skipped = [], []
     for nome in team_names:
         c_name = nome.lower().replace(" ", "-")
         existing = discord.utils.get(category.text_channels, name=c_name)
@@ -243,11 +187,9 @@ async def crea_canali_team(interaction: discord.Interaction):
         else:
             skipped.append(c_name)
 
-    msg = f"Canali pronti nella categoria 'FRANCHIGIE'.\n"
-    if created:
-        msg += f"Creati: {', '.join(created)}\n"
-    if skipped:
-        msg += f"Gia' esistenti: {', '.join(skipped)}"
+    msg = "Canali pronti nella categoria 'FRANCHIGIE'.\n"
+    if created: msg += f"Creati: {', '.join(created)}\n"
+    if skipped: msg += f"Gia' esistenti: {', '.join(skipped)}"
     await interaction.followup.send(msg)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
