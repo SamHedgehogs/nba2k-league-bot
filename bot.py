@@ -41,7 +41,7 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
     if user_id in db["teams"]:
         await interaction.response.send_message(f"Hai già registrato i {db['teams'][user_id]['nome']}!", ephemeral=True)
         return
-    db["teams"][user_id] = {"nome": nome_squadra, "cap_space": 140, "roster": []}
+            db["teams"][user_id] = {"nome": nome_squadra, "cap_space": 160, "roster": []}
     save_db(db)
     await interaction.response.send_message(f"Squadra **{nome_squadra}** registrata con successo!")
 
