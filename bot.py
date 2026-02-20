@@ -5,7 +5,7 @@ from discord import app_commands
 import json
 import aiohttp
 
-# Lista delle 30 franchigie NBA (solo soprannome)
+# Config
 FRANCHIGIE_NBA = [
     "Hawks", "Celtics", "Nets", "Hornets",
     "Bulls", "Cavaliers", "Pistons", "Pacers",
@@ -54,14 +54,12 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
     if user_id in db["teams"]:
         await interaction.response.send_message(f"Hai gia' registrato i **{db['teams'][user_id]['nome']}**!", ephemeral=True)
         return
+    
     franchige_lower = [f.lower() for f in FRANCHIGIE_NBA]
     if nome_squadra.lower() not in franchige_lower:
-        lista = "
-".join(FRANCHIGIE_NBA)
-        await interaction.response.send_message(f"**{nome_squadra}** non e' una franchigia valida!
-Franchigie disponibili:
-{lista}", ephemeral=True)
+        await interaction.response.send_message(f"Franchigia non valida. Scegli tra: {', '.join(FRANCHIGIE_NBA)}", ephemeral=True)
         return
+    
     nome_ufficiale = FRANCHIGIE_NBA[franchige_lower.index(nome_squadra.lower())]
     if any(t["nome"] == nome_ufficiale for t in db["teams"].values()):
         await interaction.response.send_message(f"I **{nome_ufficiale}** sono gia' stati scelti!", ephemeral=True)
@@ -93,18 +91,16 @@ async def franchigie(interaction: discord.Interaction):
     prese = [t["nome"] for t in db["teams"].values()]
     disponibili = [f for f in FRANCHIGIE_NBA if f not in prese]
     if not disponibili:
-        await interaction.response.send_message("Tutte le franchigie sono assegnate!")
+        await interaction.response.send_message("Tutte assegnate!")
         return
-    lista = "
-".join([f"- {f}" for f in disponibili])
-    await interaction.response.send_message(embed=discord.Embed(title="Disponibili", description=lista, color=0xFFD700))
+    await interaction.response.send_message(f"Disponibili: {', '.join(disponibili)}")
 
 @bot.tree.command(name="roster", description="Mostra il roster")
 async def roster(interaction: discord.Interaction, utente: discord.Member = None):
     db = load_db()
     uid = str(utente.id if utente else interaction.user.id)
     if uid not in db["teams"]:
-        await interaction.response.send_message("Nessuna squadra trovata.", ephemeral=True)
+        await interaction.response.send_message("Nessuna squadra.", ephemeral=True)
         return
     team = db["teams"][uid]
     players = sorted(team["roster"], key=lambda x: x.get('overall', 0), reverse=True)
@@ -125,7 +121,7 @@ async def firma_fa(interaction: discord.Interaction, nome: str, stipendio: float
     if team["cap_space"] < stipendio:
         await interaction.response.send_message("Budget insufficiente!", ephemeral=True)
         return
-    team["roster"].append({"nome": nome, "stipendio": stipendio, "posizione": "N/D", "overall": 0})
+    team["roster"].append({"nome": nome, "stipendio": stipendio, "posizione": "FA", "overall": 0})
     team["cap_space"] = round(team["cap_space"] - stipendio, 1)
     save_db(db)
     await interaction.response.send_message(f"Firmato {nome} per ${stipendio}M!")
