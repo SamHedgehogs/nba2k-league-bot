@@ -41,6 +41,19 @@ HARD_CAP = 200
 ADMIN_CHANNEL_NAME = "admin-league"
 MERCATO_CHANNEL_NAME = "mercato"
 
+def parse_val(v):
+    """Normalizza i valori: gestisce stringhe, None e converte dollari in milioni se necessario."""
+    if v in ("RFA", "UFA", "-", None, ""):
+        return v
+    try:
+        val = float(str(v).replace(",", "."))
+        # Se il valore è > 1000, assumiamo sia in dollari e convertiamo in milioni
+        if val > 1000:
+            return round(val / 1000000, 2)
+        return round(val, 2)
+    except (ValueError, TypeError):
+        return v
+
 def find_team_in_data(query, data):
     q = query.strip().lower()
     for key in data:
@@ -88,10 +101,25 @@ def create_roster_embed(team_key, team_info):
     players = team_info.get("roster", [])
     nome_squadra = team_info.get("squadra", team_key)
     
-    sorted_players = sorted(players, key=lambda x: x.get("overall", 0), reverse=True)
+    # Pulizia e normalizzazione dati giocatori
+    for p in players:
+        # Se l'overall è un numero enorme, probabilmente è un errore di colonna nel foglio
+        ovr = p.get("overall", 0)
+        p["overall_display"] = ovr if (isinstance(ovr, (int, float)) and ovr < 200) else "-"
+        
+        # Normalizza stipendi (dollari -> milioni)
+        for year in ["stipendio_2k26", "stipendio_2k27", "stipendio_2k28", "stipendio_2k29", "stipendio_2k30"]:
+            p[year] = parse_val(p.get(year))
+
+    sorted_players = sorted(players, key=lambda x: (isinstance(x.get("overall_display"), (int, float)), x.get("overall_display", 0)), reverse=True)
     
     def safe_sum(key):
-        return sum((p.get(key) or 0) for p in players if p.get(key) not in ("RFA", "UFA", "-"))
+        total = 0
+        for p in players:
+            v = p.get(key)
+            if isinstance(v, (int, float)):
+                total += v
+        return round(total, 2)
     
     sal26 = safe_sum("stipendio_2k26")
     
@@ -105,7 +133,7 @@ def create_roster_embed(team_key, team_info):
     for i, p in enumerate(sorted_players, 1):
         n = p.get("nome", "???")
         if len(n) > 18: n = n[:16] + ".."
-        row = f"{i:<2} {n:<18} {p.get('overall',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
+        row = f"{i:<2} {n:<18} {p.get('overall_display',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
         lines.append(row)
     
     table_content = "\n".join(lines)
@@ -117,10 +145,12 @@ def create_roster_embed(team_key, team_info):
     if team_info.get("discord_user"):
         embed.add_field(name="👤 GM", value=f"<@{team_info['discord_user']}>", inline=True)
     
-    top8 = sorted_players[:8]
+    top8 = [p for p in sorted_players if isinstance(p.get("overall_display"), (int, float))][:8]
     if top8:
-        avg = round(sum(p.get("overall", 0) for p in top8) / len(top8), 1)
+        avg = round(sum(p.get("overall_display", 0) for p in top8) / len(top8), 1)
         embed.add_field(name="⭐ OVR Top 8", value=f"`{avg}`", inline=True)
+    else:
+        embed.add_field(name="⭐ OVR Top 8", value="`N/A`", inline=True)
     
     embed.add_field(name="\u200b", value="\u200b", inline=False)
     embed.add_field(name="💰 Salary 2K26", value=sal_bar(sal26), inline=False)
@@ -202,7 +232,6 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
     await interaction.response.defer(ephemeral=True)
     data = await fetch_sheet_data()
     
-    # Tentativo di trovare la squadra proponente dal nome del canale
     k1, info1 = find_team_in_data(interaction.channel.name.replace("-", " "), data)
     k2, info2 = find_team_in_data(squadra_ricevente, data)
     
@@ -211,10 +240,19 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
         return
     
     if not info1:
-         await interaction.followup.send("Impossibile determinare la tua squadra dal canale attuale.")
-         return
+        await interaction.followup.send("Impossibile determinare la tua squadra dal canale attuale.")
+        return
 
-    sal1 = sum((p.get("stipendio_2k26") or 0) for p in info1.get("roster", []) if p.get("stipendio_2k26") not in ("RFA", "UFA", "-"))
+    def get_sal_total(info):
+        players = info.get("roster", [])
+        total = 0
+        for p in players:
+            v = parse_val(p.get("stipendio_2k26"))
+            if isinstance(v, (int, float)):
+                total += v
+        return round(total, 2)
+
+    sal1 = get_sal_total(info1)
     
     error = None
     if sal1 > HARD_CAP:
@@ -242,7 +280,7 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
     class TradeView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
-            
+        
         @discord.ui.button(label="Accetta", style=discord.ButtonStyle.green)
         async def accept(self, b_int, button):
             mercato_ch = discord.utils.get(b_int.guild.text_channels, name=MERCATO_CHANNEL_NAME)
@@ -250,14 +288,14 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
                 res_embed = discord.Embed(title="✅ TRADE UFFICIALE", color=0x00FF00, description=f"Lo scambio tra **{k1}** e **{k2}** è stato approvato!")
                 res_embed.add_field(name="Dettagli", value=f"Dati: {giocatori_dati} Ricevuti: {giocatori_ricevuti}")
                 await mercato_ch.send(embed=res_embed)
-            await b_int.response.send_message("Trade approvata e postata in mercato.")
+                await b_int.response.send_message("Trade approvata e postata in mercato.")
             self.stop()
-            
+        
         @discord.ui.button(label="Rifiuta", style=discord.ButtonStyle.red)
         async def deny(self, b_int, button):
             await b_int.response.send_message("Trade rifiutata.")
             self.stop()
-            
+    
     await admin_ch.send(embed=embed, view=TradeView())
     await interaction.followup.send("Proposta di trade inviata agli admin!")
 
