@@ -109,11 +109,8 @@ def create_roster_embed(team_key, team_info):
         row = f"{i:<2} {n:<18} {p.get('overall',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
         lines.append(row)
     
-    table_content = "
-".join(lines)
-    table = f"```
-{table_content}
-```"
+    table_content = "\n.join(lines)
+    table = f"```\n{table_content}\n``"
     
     color = 0xFF0000 if sal26 > HARD_CAP else (0xFF8C00 if sal26 > SAL_CAP else 0x00FF00)
     embed = discord.Embed(title=f"🏀 {nome_squadra}", description=table, color=color)
