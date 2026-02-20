@@ -17,6 +17,7 @@ FRANCHIGIE_NBA = [
     "Trail Blazers", "Kings", "Spurs", "Jazz"
 ]
 
+# Nuova URL Apps Script aggiornata
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxU7vLSn0dZuVVfZTO9M6Ynl5MuXQPwcMJNFnHX2HbhZM_VzBQGHtVSZ4nVw1kVZ5eE/exec"
 
 def load_db():
@@ -24,7 +25,7 @@ def load_db():
         with open('league_db.json', 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        return {"teams": {}, "players": [], "trades": []}
+        return {"teams": {}, "players": [], "trades": [], "reali": {}}
 
 def save_db(data):
     with open('league_db.json', 'w') as f:
@@ -39,6 +40,7 @@ class LeagueBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
+        # Sincronizza i comandi slash globalmente
         await self.tree.sync()
         print(f"Comandi sincronizzati per {self.user}")
 
@@ -76,7 +78,7 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
                     data = await resp.json(content_type=None)
                     if nome_ufficiale in data:
                         db["teams"][user_id]["roster"] = data[nome_ufficiale]
-                        costo = sum(p["stipendio"] for p in data[nome_ufficiale])
+                        costo = sum(p.get("stipendio", 0) for p in data[nome_ufficiale])
                         db["teams"][user_id]["cap_space"] = round(160 - costo, 1)
                         save_db(db)
                         await interaction.followup.send(f"Franchigia **{nome_ufficiale}** registrata! Caricati {len(data[nome_ufficiale])} giocatori.")
@@ -88,76 +90,94 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
     await interaction.followup.send(f"Franchigia **{nome_ufficiale}** registrata senza roster reale (errore script).")
 
 @bot.tree.command(name="roster", description="Mostra il roster di una squadra")
-@app_commands.describe(squadra="Nome della franchigia (opzionale se sei registrato)")
+@app_commands.describe(squadra="Nome della franchigia (es: Hawks)")
 async def roster(interaction: discord.Interaction, squadra: str = None):
     db = load_db()
     
     target_team = None
+    nome_visualizzato = ""
+
     if squadra:
-        squadra_lower = squadra.lower()
-        # Cerca tra i nomi ufficiali
-        for f in FRANCHIGIE_NBA:
-            if f.lower() == squadra_lower:
-                # Cerca se qualcuno l'ha presa
-                for t in db["teams"].values():
-                    if t["nome"] == f:
-                        target_team = t
-                        break
-                # Se nessuno l'ha presa, mostra il roster base (se possibile) o errore
-                if not target_team:
-                    await interaction.response.send_message(f"La squadra **{f}** non è ancora stata registrata da nessun utente.", ephemeral=True)
-                    return
+        s_low = squadra.lower()
+        # 1. Cerca tra i team REGISTRATI dagli utenti
+        for uid, t in db["teams"].items():
+            if t["nome"].lower() == s_low:
+                target_team = t
+                nome_visualizzato = t["nome"]
                 break
+        
+        # 2. Se non trovato tra i registrati, cerca nei dati REALI (se caricati con /init_league)
+        if not target_team and "reali" in db:
+            for f_nome, players in db["reali"].items():
+                if f_nome.lower() == s_low:
+                    target_team = {"nome": f_nome, "roster": players, "cap_space": "N/A"}
+                    nome_visualizzato = f_nome
+                    break
+        
         if not target_team:
-            await interaction.response.send_message("Franchigia non trovata.", ephemeral=True)
+            await interaction.response.send_message(f"Squadra '{squadra}' non trovata o non ancora registrata.", ephemeral=True)
             return
     else:
+        # Se non specifica nulla, mostra il team di chi scrive
         uid = str(interaction.user.id)
         if uid not in db["teams"]:
             await interaction.response.send_message("Non hai un team registrato. Specifica una squadra: `/roster squadra:Hawks`", ephemeral=True)
             return
         target_team = db["teams"][uid]
+        nome_visualizzato = target_team["nome"]
 
     players = sorted(target_team["roster"], key=lambda x: x.get('overall', 0), reverse=True)
+    
+    # Costruisco la lista stringhe per l'embed
+    desc_list = []
+    for p in players:
+        n = p.get('nome', 'Sconosciuto')
+        pos = p.get('posizione', '?')
+        ovr = p.get('overall', '?')
+        # Gestisco sia 'stipendio' che '2025-26 Salary' (nomi colonne diverse possibili)
+        sal = p.get('stipendio') or p.get('2025-26 Salary') or 0
+        desc_list.append(f"🏀 **{n}** ({pos}) OVR:{ovr} - ${sal}M")
+    
     desc = "
-".join([f"🏀 **{p['nome']}** ({p.get('posizione','?')}) OVR:{p.get('overall','?')} - ${p['stipendio']}M" for p in players])
-    embed = discord.Embed(title=f"Roster: {target_team['nome']}", description=desc or "Vuoto", color=0x00FF00)
-    embed.set_footer(text=f"Cap Space: ${target_team['cap_space']}M")
+".join(desc_list)
+    embed = discord.Embed(title=f"Roster: {nome_visualizzato}", description=desc or "Roster vuoto", color=0x00FF00)
+    
+    cap = target_team.get("cap_space", "N/A")
+    embed.set_footer(text=f"Cap Space rimanente: ${cap}M (Soglia: $160M)")
+    
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="init_league", description="Inizializza la lega dal file Google Sheets (Admin only)")
+@bot.tree.command(name="init_league", description="Carica i dati dei roster dal Google Sheet")
 async def init_league(interaction: discord.Interaction):
-    # Solo tu puoi farlo per ora (SamHedgehogs)
-    if str(interaction.user.id) != "111111111111111111": # Sostituire col tuo ID se vuoi restrizione
-        pass 
-
     await interaction.response.defer()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(APPS_SCRIPT_URL) as resp:
                 if resp.status == 200:
                     all_data = await resp.json(content_type=None)
-                    db = {"teams": {}, "players": [], "trades": []}
-                    # Assegniamo i team a ID fittizi o lasciamo liberi per la registrazione?
-                    # Per ora carichiamo i dati in una struttura di "roster reali" nel DB
+                    db = load_db()
                     db["reali"] = all_data
                     save_db(db)
-                    await interaction.followup.send("Dati della lega caricati correttamente!")
+                    await interaction.followup.send(f"✅ Dati lega caricati! {len(all_data)} squadre pronte.")
                 else:
-                    await interaction.followup.send("Errore nel recupero dati dallo script.")
+                    await interaction.followup.send("❌ Errore Apps Script: Status " + str(resp.status))
         except Exception as e:
-            await interaction.followup.send(f"Errore: {e}")
+            await interaction.followup.send(f"❌ Errore connessione: {e}")
 
-@bot.tree.command(name="crea_canali_team", description="Crea i canali per ogni squadra (Admin only)")
+@bot.tree.command(name="crea_canali_team", description="Crea i canali per ogni franchigia")
 async def crea_canali_team(interaction: discord.Interaction):
     await interaction.response.defer()
     guild = interaction.guild
-    category = await guild.create_category("FRANCHIGIE")
+    category = discord.utils.get(guild.categories, name="FRANCHIGIE")
+    if not category:
+        category = await guild.create_category("FRANCHIGIE")
     
     for f in FRANCHIGIE_NBA:
-        channel_name = f.lower().replace(" ", "-")
-        await guild.create_text_channel(channel_name, category=category)
+        c_name = f.lower().replace(" ", "-")
+        existing = discord.utils.get(category.text_channels, name=c_name)
+        if not existing:
+            await guild.create_text_channel(c_name, category=category)
     
-    await interaction.followup.send("Canali creati!")
+    await interaction.followup.send("✅ Canali franchigie pronti nella categoria 'FRANCHIGIE'.")
 
 bot.run(os.getenv("DISCORD_TOKEN"))
