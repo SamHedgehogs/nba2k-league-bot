@@ -72,7 +72,7 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
         try:
             async with session.get(APPS_SCRIPT_URL) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     if nome_ufficiale in data:
                         db["teams"][user_id]["roster"] = data[nome_ufficiale]
                         costo = sum(p["stipendio"] for p in data[nome_ufficiale])
@@ -80,7 +80,8 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
                         save_db(db)
                         await interaction.followup.send(f"Franchigia **{nome_ufficiale}** registrata! Caricati {len(data[nome_ufficiale])} giocatori.")
                         return
-        except: pass
+        except Exception as e:
+            print(f"Errore Apps Script: {e}")
     
     save_db(db)
     await interaction.followup.send(f"Franchigia **{nome_ufficiale}** registrata senza roster reale (errore script).")
@@ -104,8 +105,7 @@ async def roster(interaction: discord.Interaction, utente: discord.Member = None
         return
     team = db["teams"][uid]
     players = sorted(team["roster"], key=lambda x: x.get('overall', 0), reverse=True)
-    desc = "
-".join([f"🏀 **{p['nome']}** ({p.get('posizione','?')}) OVR:{p.get('overall','?')} - ${p['stipendio']}M" for p in players])
+    desc = "\n".join([f"ð0 **{p['nome']}** ({p.get('posizione','?')}) OVR:{p.get('overall','?')} - ${p['stipendio']}M" for p in players])
     embed = discord.Embed(title=f"Roster: {team['nome']}", description=desc or "Vuoto", color=0x00FF00)
     embed.set_footer(text=f"Cap Space: ${team['cap_space']}M")
     await interaction.response.send_message(embed=embed)
