@@ -138,7 +138,7 @@ async def roster(interaction: discord.Interaction, squadra: str = None):
         sal = p.get('stipendio') or p.get('2025-26 Salary') or 0
         desc_list.append(f"🏀 **{n}** ({pos}) OVR:{ovr} - ${sal}M")
     
-            desc = "\n".join(desc_list)
+        desc = "\n".join(desc_list)
     embed = discord.Embed(title=f"Roster: {nome_visualizzato}", description=desc or "Roster vuoto", color=0x00FF00)
     
     cap = target_team.get("cap_space", "N/A")
