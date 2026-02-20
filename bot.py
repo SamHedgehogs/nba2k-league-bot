@@ -97,6 +97,15 @@ def find_team_in_data(query: str, data: dict):
             return key, data[key]
     return None, None
 
+async def fetch_sheet_data():
+    """Scarica i dati dal Google Sheet via Apps Script. Gestisce redirect."""
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        async with session.get(APPS_SCRIPT_URL, allow_redirects=True) as resp:
+            if resp.status != 200:
+                raise Exception(f"Status {resp.status}")
+            return await resp.json(content_type=None)
+
 def load_db():
     try:
         with open('league_db.json', 'r') as f:
@@ -130,16 +139,11 @@ async def on_ready():
 @app_commands.describe(squadra="Nome della franchigia (es: Bucks, Sixers, Lakers)")
 async def roster(interaction: discord.Interaction, squadra: str):
     await interaction.response.defer()
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(APPS_SCRIPT_URL) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send(f"Errore Apps Script: status {resp.status}")
-                    return
-                all_data = await resp.json(content_type=None)
-        except Exception as e:
-            await interaction.followup.send(f"Errore connessione: {e}")
-            return
+    try:
+        all_data = await fetch_sheet_data()
+    except Exception as e:
+        await interaction.followup.send(f"Errore connessione Apps Script: {e}")
+        return
 
     team_key, team_info = find_team_in_data(squadra, all_data)
     if not team_info:
@@ -159,8 +163,14 @@ async def roster(interaction: discord.Interaction, squadra: str):
 
     CAP = 225  # Salary cap in milioni
 
-    # Costruisco lista giocatori ordinati per OVR
     sorted_players = sorted(players, key=lambda x: x.get('overall', 0), reverse=True)
+
+    def fmt_sal(s):
+        if s == 'RFA':
+            return 'RFA'
+        if not s:
+            return '-'
+        return f"${s}M"
 
     desc_lines = []
     for p in sorted_players:
@@ -169,21 +179,12 @@ async def roster(interaction: discord.Interaction, squadra: str):
         s26 = p.get('stipendio_2k26', 0)
         s27 = p.get('stipendio_2k27', 0)
         s28 = p.get('stipendio_2k28', 0)
-
-        def fmt_sal(s):
-            if s == 'RFA':
-                return 'RFA'
-            if not s:
-                return '-'
-            return f"${s}M"
-
         desc_lines.append(
             f"**{nome}** (OVR {ovr}) | 2K26:{fmt_sal(s26)} 2K27:{fmt_sal(s27)} 2K28:{fmt_sal(s28)}"
         )
 
     desc = "\n".join(desc_lines) if desc_lines else "Roster vuoto"
 
-    # Discord embed ha un limite di 4096 caratteri per la description
     if len(desc) > 4000:
         desc = desc[:4000] + "\n..."
 
@@ -205,37 +206,27 @@ async def roster(interaction: discord.Interaction, squadra: str):
 @bot.tree.command(name="init_league", description="Ricarica i dati dal Google Sheet e mostra le squadre trovate")
 async def init_league(interaction: discord.Interaction):
     await interaction.response.defer()
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(APPS_SCRIPT_URL) as resp:
-                if resp.status == 200:
-                    all_data = await resp.json(content_type=None)
-                    db = load_db()
-                    db["reali"] = all_data
-                    save_db(db)
-                    team_list = ", ".join(all_data.keys())
-                    await interaction.followup.send(
-                        f"Dati lega caricati! {len(all_data)} squadre: {team_list}"
-                    )
-                else:
-                    await interaction.followup.send("Errore Apps Script: Status " + str(resp.status))
-        except Exception as e:
-            await interaction.followup.send(f"Errore connessione: {e}")
+    try:
+        all_data = await fetch_sheet_data()
+        db = load_db()
+        db["reali"] = all_data
+        save_db(db)
+        team_list = ", ".join(all_data.keys())
+        await interaction.followup.send(
+            f"Dati lega caricati! {len(all_data)} squadre: {team_list}"
+        )
+    except Exception as e:
+        await interaction.followup.send(f"Errore Apps Script: {e}")
 
 @bot.tree.command(name="crea_canali_team", description="Crea i canali per ogni franchigia nella categoria FRANCHIGIE")
 async def crea_canali_team(interaction: discord.Interaction):
     await interaction.response.defer()
     guild = interaction.guild
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(APPS_SCRIPT_URL) as resp:
-                if resp.status == 200:
-                    all_data = await resp.json(content_type=None)
-                    team_names = list(all_data.keys())
-                else:
-                    team_names = []
-        except Exception:
-            team_names = []
+    try:
+        all_data = await fetch_sheet_data()
+        team_names = list(all_data.keys())
+    except Exception:
+        team_names = []
 
     category = discord.utils.get(guild.categories, name="FRANCHIGIE")
     if not category:
