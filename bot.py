@@ -1,36 +1,72 @@
 import os
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv
+from discord import app_commands
+import json
 
-# Load environment variables
-load_dotenv()
+# Caricamento database (semplice file JSON per ora)
+def load_db():
+    try:
+        with open('league_db.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"teams": {}, "players": [], "trades": []}
 
-# Set up the bot
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+def save_db(data):
+    with open('league_db.json', 'w') as f:
+        json.dump(data, f, indent=4)
+
+class LeagueBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        print(f"Comandi sincronizzati per {self.user}")
+
+bot = LeagueBot()
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
+    print(f'Lega NBA 2K Online! Loggato come {bot.user}')
 
-@bot.hybrid_command(name="ping", description="Replies with pong")
-async def ping(ctx):
-    await ctx.send('pong')
+# COMANDO: REGISTRA TEAM
+@bot.tree.command(name="registra_team", description="Registra la tua squadra NBA 2K")
+async def registra_team(interaction: discord.Interaction, nome_squadra: str):
+    db = load_db()
+    user_id = str(interaction.user.id)
+    
+    if user_id in db["teams"]:
+        await interaction.response.send_message(f"Hai già registrato i {db['teams'][user_id]['nome']}!", ephemeral=True)
+        return
+    
+    db["teams"][user_id] = {
+        "nome": nome_squadra,
+        "cap_space": 140, # Milioni fittizi
+        "roster": []
+    }
+    save_db(db)
+    await interaction.response.send_message(f"Squadra **{nome_squadra}** registrata con successo!")
 
-@bot.hybrid_command(name="hello", description="Says hello to the user")
-async def hello(ctx):
-    await ctx.send(f"Hello {ctx.author.name}! 😃")
+# COMANDO: INFO TEAM
+@bot.tree.command(name="team", description="Mostra info sulla tua squadra")
+async def team_info(interaction: discord.Interaction):
+    db = load_db()
+    user_id = str(interaction.user.id)
+    
+    if user_id not in db["teams"]:
+        await interaction.response.send_message("Non hai ancora registrato una squadra. Usa /registra_team", ephemeral=True)
+        return
+    
+    team = db["teams"][user_id]
+    embed = discord.Embed(title=f"Franchigia: {team['nome']}", color=discord.Color.blue())
+    embed.add_field(name="Salary Cap Space", value=f"${team['cap_space']}M")
+    embed.add_field(name="Giocatori", value=len(team['roster']))
+    
+    await interaction.response.send_message(embed=embed)
 
-# Run the bot
-if __name__ == "__main__":
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        raise ValueError("No token found. Make sure DISCORD_TOKEN is set in your environment variables.")
-    bot.run(token)
+token = os.getenv("DISCORD_TOKEN")
+bot.run(token)
