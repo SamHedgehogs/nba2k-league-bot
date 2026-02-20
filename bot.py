@@ -46,13 +46,19 @@ MERCATO_CHANNEL_NAME = "mercato"
 def find_team_in_data(query, data):
     q = query.strip().lower()
     for key in data:
-        if key.lower() == q: return key, data[key]
+        if key.lower() == q:
+            return key, data[key]
+    
     keyword = TEAM_ALIASES.get(q)
     if keyword:
         for key in data:
-            if keyword in key.upper(): return key, data[key]
+            if keyword in key.upper():
+                return key, data[key]
+                
     for key in data:
-        if q in key.lower(): return key, data[key]
+        if q in key.lower():
+            return key, data[key]
+            
     return None, None
 
 def _fetch_sync():
@@ -68,55 +74,61 @@ def sal_bar(total):
     pct = min(total / SAL_CAP, 1.3)
     filled = int(pct * 10)
     bar = chr(9608) * min(filled, 10) + chr(9617) * (10 - min(filled, 10))
-    if total > HARD_CAP: 
-        status = "\U0001f534" # Rosso (🔴)
-    elif total > SAL_CAP: 
-        status = "\U0001f7e1" # Giallo (🟡)
-    elif total >= MIN_CAP: 
-        status = "\U0001f7e2" # Verde (🟢)
-    else: 
-        status = "\U0001f535" # Blu (🔵)
+    
+    if total > HARD_CAP:
+        status = "\\U0001f534" # Rosso (🔴)
+    elif total > SAL_CAP:
+        status = "\\U0001f7e1" # Giallo (🟡)
+    elif total >= MIN_CAP:
+        status = "\\U0001f7e2" # Verde (🟢)
+    else:
+        status = "\\U0001f535" # Blu (🔵)
+        
     return f"{status} `{bar}` ${round(total, 1)}M / ${SAL_CAP}M"
 
 def create_roster_embed(team_key, team_info):
     players = team_info.get("roster", [])
     nome_squadra = team_info.get("squadra", team_key)
+    
     sorted_players = sorted(players, key=lambda x: x.get("overall", 0), reverse=True)
-
+    
     def safe_sum(key):
         return sum((p.get(key) or 0) for p in players if p.get(key) not in ("RFA", "UFA", "-"))
-
+        
     sal26 = safe_sum("stipendio_2k26")
-
+    
     def cell(v):
         if v in ("RFA", "UFA"): return v
         return f"{v}" if v and v != 0 else "-"
 
     header = f"{'#':<2} {'GIOCATORE':<18} {'OVR':<3} {'26':>4} {'27':>4} {'28':>4} {'29':>4} {'30':>4}"
     lines = [header, "-" * 55]
+    
     for i, p in enumerate(sorted_players, 1):
         n = p.get("nome", "???")
         if len(n) > 18: n = n[:16] + ".."
         row = f"{i:<2} {n:<18} {p.get('overall',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
         lines.append(row)
-
+        
     table = "```
 " + "
 ".join(lines) + "
 ```"
+    
     color = 0xFF0000 if sal26 > HARD_CAP else (0xFF8C00 if sal26 > SAL_CAP else 0x00FF00)
-    embed = discord.Embed(title=f"\U0001f3c0 {nome_squadra}", description=table, color=color)
+    embed = discord.Embed(title=f"\\U0001f3c0 {nome_squadra}", description=table, color=color)
     
     if team_info.get("discord_user"):
-        embed.add_field(name="\U0001f464 GM", value=f"<@{team_info['discord_user']}>", inline=True)
-    
+        embed.add_field(name="\\U0001f464 GM", value=f"<@{team_info['discord_user']}>", inline=True)
+        
     top8 = sorted_players[:8]
     if top8:
         avg = round(sum(p.get("overall", 0) for p in top8) / len(top8), 1)
-        embed.add_field(name="\u2b50 OVR Top 8", value=f"`{avg}`", inline=True)
+        embed.add_field(name="\\u2b50 OVR Top 8", value=f"`{avg}`", inline=True)
+        
+    embed.add_field(name="\\u200b", value="\\u200b", inline=False)
+    embed.add_field(name="\\U0001f4b0 Salary 2K26", value=sal_bar(sal26), inline=False)
     
-    embed.add_field(name="\u200b", value="\u200b", inline=False)
-    embed.add_field(name="\U0001f4b0 Salary 2K26", value=sal_bar(sal26), inline=False)
     return embed
 
 class LeagueBot(commands.Bot):
@@ -125,7 +137,7 @@ class LeagueBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
-
+        
     async def setup_hook(self):
         await self.tree.sync()
 
@@ -163,10 +175,12 @@ async def cut(interaction: discord.Interaction, giocatore: str, motivazione: str
     if not admin_ch:
         await interaction.response.send_message("Canale admin non trovato.", ephemeral=True)
         return
-    embed = discord.Embed(title="\u2702\ufe0f Richiesta CUT", color=0xFF4444)
+    
+    embed = discord.Embed(title="\\u2702\\ufe0f Richiesta CUT", color=0xFF4444)
     embed.add_field(name="GM", value=interaction.user.mention)
     embed.add_field(name="Giocatore", value=giocatore)
     embed.add_field(name="Motivazione", value=motivazione)
+    
     await admin_ch.send(embed=embed)
     await interaction.response.send_message(f"Richiesta di taglio per **{giocatore}** inviata agli admin!", ephemeral=True)
 
@@ -176,12 +190,14 @@ async def firma_fa(interaction: discord.Interaction, giocatore: str, offerta: st
     if not admin_ch:
         await interaction.response.send_message("Canale admin non trovato.", ephemeral=True)
         return
-    embed = discord.Embed(title="\U0001f50b Offerta Free Agent", color=0x4444FF)
+        
+    embed = discord.Embed(title="\\U0001f50b Offerta Free Agent", color=0x4444FF)
     embed.add_field(name="GM", value=interaction.user.mention)
     embed.add_field(name="Giocatore", value=giocatore)
     embed.add_field(name="Offerta", value=offerta)
     embed.add_field(name="Durata", value=f"{anni} anni")
     embed.add_field(name="Motivazione", value=motivazione)
+    
     await admin_ch.send(embed=embed)
     await interaction.response.send_message(f"Offerta per **{giocatore}** registrata. Attendi la valutazione degli admin.", ephemeral=True)
 
@@ -191,11 +207,13 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
     data = await fetch_sheet_data()
     k1, info1 = find_team_in_data(interaction.channel.name.replace("-", " "), data)
     k2, info2 = find_team_in_data(squadra_ricevente, data)
+    
     if not info2:
         await interaction.followup.send("Squadra ricevente non trovata.")
         return
-    
+        
     sal1 = sum((p.get("stipendio_2k26") or 0) for p in info1.get("roster", []) if p.get("stipendio_2k26") not in ("RFA", "UFA", "-"))
+    
     error = None
     if sal1 > HARD_CAP:
         if stipendio_ricevuto > stipendio_ceduto:
@@ -203,35 +221,36 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
     elif sal1 > SAL_CAP:
         if stipendio_ricevuto > (stipendio_ceduto * 1.3):
             error = f"Sei sopra il Salary Cap (${sal1}M). Il ricevuto (${stipendio_ricevuto}M) supera il 130% del ceduto (${round(stipendio_ceduto*1.3,1)}M)."
-    
+            
     if error:
-        await interaction.followup.send(f"\u26a0\ufe0f **Violazione Salary Cap:** {error}")
+        await interaction.followup.send(f"\\u26a0\\ufe0f **Violazione Salary Cap:** {error}")
         return
-
+        
     admin_ch = discord.utils.get(interaction.guild.text_channels, name=ADMIN_CHANNEL_NAME)
     if not admin_ch:
         await interaction.followup.send("Canale admin non trovato.")
         return
-
-    embed = discord.Embed(title="\U0001f91d Proposta di Trade", color=0xFFFF00)
+        
+    embed = discord.Embed(title="\\U0001f91d Proposta di Trade", color=0xFFFF00)
     embed.add_field(name="GM Proponente", value=interaction.user.mention)
     embed.add_field(name="Squadra Ricevente", value=k2)
     embed.add_field(name="Cede", value=f"{giocatori_dati} (${stipendio_ceduto}M)")
     embed.add_field(name="Riceve", value=f"{giocatori_ricevuti} (${stipendio_ricevuto}M)")
-
+    
     class TradeView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
+            
         @discord.ui.button(label="Accetta", style=discord.ButtonStyle.green)
         async def accept(self, b_int, button):
             mercato_ch = discord.utils.get(b_int.guild.text_channels, name=MERCATO_CHANNEL_NAME)
             if mercato_ch:
-                res_embed = discord.Embed(title="\u2705 TRADE UFFICIALE", color=0x00FF00, description=f"Lo scambio tra **{k1 or 'Sconosciuta'}** e **{k2}** è stato approvato!")
-                res_embed.add_field(name="Dettagli", value=f"Dati: {giocatori_dati}
-Ricevuti: {giocatori_ricevuti}")
+                res_embed = discord.Embed(title="\\u2705 TRADE UFFICIALE", color=0x00FF00, description=f"Lo scambio tra **{k1 or 'Sconosciuta'}** e **{k2}** è stato approvato!")
+                res_embed.add_field(name="Dettagli", value=f"Dati: {giocatori_dati} Ricevuti: {giocatori_ricevuti}")
                 await mercato_ch.send(embed=res_embed)
             await b_int.response.send_message("Trade approvata e postata in mercato.")
             self.stop()
+
         @discord.ui.button(label="Rifiuta", style=discord.ButtonStyle.red)
         async def deny(self, b_int, button):
             await b_int.response.send_message("Trade rifiutata.")
