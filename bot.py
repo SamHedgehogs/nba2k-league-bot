@@ -4,16 +4,16 @@ from discord.ext import commands
 from discord import app_commands
 import json
 
-# Lista delle 30 franchigie NBA reali
+# Lista delle 30 franchigie NBA (solo soprannome)
 FRANCHIGIE_NBA = [
-    "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets",
-    "Chicago Bulls", "Cleveland Cavaliers", "Detroit Pistons", "Indiana Pacers",
-    "Miami Heat", "Milwaukee Bucks", "New York Knicks", "Orlando Magic",
-    "Philadelphia 76ers", "Toronto Raptors", "Washington Wizards",
-    "Dallas Mavericks", "Denver Nuggets", "Golden State Warriors", "Houston Rockets",
-    "LA Clippers", "Los Angeles Lakers", "Memphis Grizzlies", "Minnesota Timberwolves",
-    "New Orleans Pelicans", "Oklahoma City Thunder", "Phoenix Suns",
-    "Portland Trail Blazers", "Sacramento Kings", "San Antonio Spurs", "Utah Jazz"
+    "Hawks", "Celtics", "Nets", "Hornets",
+    "Bulls", "Cavaliers", "Pistons", "Pacers",
+    "Heat", "Bucks", "Knicks", "Magic",
+    "Sixers", "Raptors", "Wizards",
+    "Mavericks", "Nuggets", "Warriors", "Rockets",
+    "Clippers", "Lakers", "Grizzlies", "Timberwolves",
+    "Pelicans", "Thunder", "Suns",
+    "Trail Blazers", "Kings", "Spurs", "Jazz"
 ]
 
 def load_db():
@@ -50,25 +50,21 @@ async def registra_team(interaction: discord.Interaction, nome_squadra: str):
     db = load_db()
     user_id = str(interaction.user.id)
 
-    # Controlla se l'utente ha gia' una squadra
     if user_id in db["teams"]:
         await interaction.response.send_message(f"Hai gia' registrato i **{db['teams'][user_id]['nome']}**!", ephemeral=True)
         return
 
-    # Controlla che il nome sia una franchigia NBA reale
     franchige_lower = [f.lower() for f in FRANCHIGIE_NBA]
     if nome_squadra.lower() not in franchige_lower:
         lista = "\n".join(FRANCHIGIE_NBA)
         await interaction.response.send_message(
-            f"**{nome_squadra}** non e' una franchigia NBA valida!\n\nFranchigie disponibili:\n{lista}",
+            f"**{nome_squadra}** non e' una franchigia valida!\n\nFranchigie disponibili:\n{lista}",
             ephemeral=True
         )
         return
 
-    # Trova il nome con la maiuscola corretta
     nome_ufficiale = FRANCHIGIE_NBA[franchige_lower.index(nome_squadra.lower())]
 
-    # Controlla che la franchigia non sia gia' presa
     franchigie_prese = [t["nome"] for t in db["teams"].values()]
     if nome_ufficiale in franchigie_prese:
         await interaction.response.send_message(
