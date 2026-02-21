@@ -350,7 +350,8 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
 @bot.tree.command(name="update_free_agent", description="Aggiorna la lista dei free agent nel canale dedicato")
 async def update_free_agent(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    agents = get_free_agents_from_sheet()
+    loop = asyncio.get_event_loop()
+    agents = await loop.run_in_executor(None, get_free_agents_from_sheet)
     text = format_free_agents_message(agents)
 
     channel = interaction.guild.get_channel(FREE_AGENT_CHANNEL_ID)
