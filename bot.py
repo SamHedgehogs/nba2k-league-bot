@@ -40,14 +40,13 @@ SAL_CAP = 160
 HARD_CAP = 200
 ADMIN_CHANNEL_NAME = "admin-league"
 MERCATO_CHANNEL_NAME = "mercato"
+FREE_AGENT_CHANNEL_ID = 1474101752231104725  # canale free agent
 
 def parse_val(v):
-    """Normalizza i valori: gestisce stringhe, None e converte dollari in milioni se necessario."""
     if v in ("RFA", "UFA", "-", None, ""):
         return v
     try:
         val = float(str(v).replace(",", "."))
-        # Se il valore è > 1000, assumiamo sia in dollari e convertiamo in milioni
         if val > 1000:
             return round(val / 1000000, 2)
         return round(val, 2)
@@ -59,17 +58,14 @@ def find_team_in_data(query, data):
     for key in data:
         if key.lower() == q:
             return key, data[key]
-    
     keyword = TEAM_ALIASES.get(q)
     if keyword:
         for key in data:
             if keyword in key.upper():
                 return key, data[key]
-    
     for key in data:
         if q in key.lower():
             return key, data[key]
-    
     return None, None
 
 def _fetch_sync():
@@ -85,7 +81,6 @@ def sal_bar(total):
     pct = min(total / SAL_CAP, 1.3)
     filled = int(pct * 10)
     bar = "█" * min(filled, 10) + "░" * (10 - min(filled, 10))
-    
     if total > HARD_CAP:
         status = "🔴"
     elif total > SAL_CAP:
@@ -94,25 +89,24 @@ def sal_bar(total):
         status = "🟢"
     else:
         status = "🔵"
-    
     return f"{status} `{bar}` ${round(total, 1)}M / ${SAL_CAP}M"
 
 def create_roster_embed(team_key, team_info):
     players = team_info.get("roster", [])
     nome_squadra = team_info.get("squadra", team_key)
-    
-    # Pulizia e normalizzazione dati giocatori
+
     for p in players:
-        # Se l'overall è un numero enorme, probabilmente è un errore di colonna nel foglio
         ovr = p.get("overall", 0)
         p["overall_display"] = ovr if (isinstance(ovr, (int, float)) and ovr < 200) else "-"
-        
-        # Normalizza stipendi (dollari -> milioni)
         for year in ["stipendio_2k26", "stipendio_2k27", "stipendio_2k28", "stipendio_2k29", "stipendio_2k30"]:
             p[year] = parse_val(p.get(year))
 
-    sorted_players = sorted(players, key=lambda x: (isinstance(x.get("overall_display"), (int, float)), x.get("overall_display", 0)), reverse=True)
-    
+    sorted_players = sorted(
+        players,
+        key=lambda x: (isinstance(x.get("overall_display"), (int, float)), x.get("overall_display", 0)),
+        reverse=True
+    )
+
     def safe_sum(key):
         total = 0
         for p in players:
@@ -120,42 +114,74 @@ def create_roster_embed(team_key, team_info):
             if isinstance(v, (int, float)):
                 total += v
         return round(total, 2)
-    
+
     sal26 = safe_sum("stipendio_2k26")
-    
+
     def cell(v):
-        if v in ("RFA", "UFA"): return v
+        if v in ("RFA", "UFA"):
+            return v
         return f"{v}" if v and v != 0 else "-"
 
     header = f"{'#':<2} {'GIOCATORE':<18} {'OVR':<3} {'26':>4} {'27':>4} {'28':>4} {'29':>4} {'30':>4}"
     lines = [header, "-" * 55]
-    
+
     for i, p in enumerate(sorted_players, 1):
         n = p.get("nome", "???")
-        if len(n) > 18: n = n[:16] + ".."
-        row = f"{i:<2} {n:<18} {p.get('overall_display',0):<3} {cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} {cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} {cell(p.get('stipendio_2k30')):>4}"
+        if len(n) > 18:
+            n = n[:16] + ".."
+        row = (
+            f"{i:<2} {n:<18} {p.get('overall_display',0):<3} "
+            f"{cell(p.get('stipendio_2k26')):>4} {cell(p.get('stipendio_2k27')):>4} "
+            f"{cell(p.get('stipendio_2k28')):>4} {cell(p.get('stipendio_2k29')):>4} "
+            f"{cell(p.get('stipendio_2k30')):>4}"
+        )
         lines.append(row)
-    
+
     table_content = "\n".join(lines)
-    table = f"```\n{table_content}\n```"
-    
+    table = f"```\\n{table_content}\\n```"
+
     color = 0xFF0000 if sal26 > HARD_CAP else (0xFF8C00 if sal26 > SAL_CAP else 0x00FF00)
     embed = discord.Embed(title=f"🏀 {nome_squadra}", description=table, color=color)
-    
+
     if team_info.get("discord_user"):
         embed.add_field(name="👤 GM", value=f"<@{team_info['discord_user']}>", inline=True)
-    
+
     top8 = [p for p in sorted_players if isinstance(p.get("overall_display"), (int, float))][:8]
     if top8:
         avg = round(sum(p.get("overall_display", 0) for p in top8) / len(top8), 1)
         embed.add_field(name="⭐ OVR Top 8", value=f"`{avg}`", inline=True)
     else:
         embed.add_field(name="⭐ OVR Top 8", value="`N/A`", inline=True)
-    
+
     embed.add_field(name="\u200b", value="\u200b", inline=False)
     embed.add_field(name="💰 Salary 2K26", value=sal_bar(sal26), inline=False)
-    
+
     return embed
+
+# ---- FREE AGENT ----
+
+def get_free_agents_from_sheet():
+    data = _fetch_sync()
+    # Assumiamo che Apps Script metta i free agent sotto la chiave "FREE AGENT"
+    fa_info = data.get("FREE AGENT", {})
+    players = fa_info.get("roster", [])
+    agents = []
+    for p in players:
+        name = p.get("nome") or p.get("giocatore") or "???"
+        ovr = p.get("overall")
+        agents.append((name, ovr))
+    return agents
+
+def format_free_agents_message(agents):
+    if not agents:
+        return "Nessun free agent disponibile al momento."
+    lines = ["**FREE AGENT**\n"]
+    for name, ovr in agents:
+        ovr_txt = ovr if ovr is not None else "N/A"
+        lines.append(f"- {name} ({ovr_txt})")
+    return "\n".join(lines)
+
+# ---- BOT ----
 
 class LeagueBot(commands.Bot):
     def __init__(self):
@@ -163,7 +189,7 @@ class LeagueBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
-    
+
     async def setup_hook(self):
         await self.tree.sync()
 
@@ -184,14 +210,15 @@ async def crea_canali_team(interaction: discord.Interaction):
     await interaction.response.defer()
     data = await fetch_sheet_data()
     cat = discord.utils.get(interaction.guild.categories, name="FRANCHIGIE") or await interaction.guild.create_category("FRANCHIGIE")
-    
+
     async def proc(k, v):
         name = k.lower().replace(" ", "-")
         ch = discord.utils.get(cat.text_channels, name=name) or await interaction.guild.create_text_channel(name, category=cat)
         async for m in ch.history(limit=50):
-            if m.author == bot.user: await m.delete()
+            if m.author == bot.user:
+                await m.delete()
         await ch.send(embed=create_roster_embed(k, v))
-    
+
     await asyncio.gather(*(proc(k, v) for k, v in data.items()))
     await interaction.followup.send("Canali aggiornati con roster!")
 
@@ -201,12 +228,12 @@ async def cut(interaction: discord.Interaction, giocatore: str, motivazione: str
     if not admin_ch:
         await interaction.response.send_message("Canale admin non trovato.", ephemeral=True)
         return
-    
+
     embed = discord.Embed(title="✂️ Richiesta CUT", color=0xFF4444)
     embed.add_field(name="GM", value=interaction.user.mention)
     embed.add_field(name="Giocatore", value=giocatore)
     embed.add_field(name="Motivazione", value=motivazione)
-    
+
     await admin_ch.send(embed=embed)
     await interaction.response.send_message(f"Richiesta di taglio per **{giocatore}** inviata agli admin!", ephemeral=True)
 
@@ -216,14 +243,14 @@ async def firma_fa(interaction: discord.Interaction, giocatore: str, offerta: st
     if not admin_ch:
         await interaction.response.send_message("Canale admin non trovato.", ephemeral=True)
         return
-    
+
     embed = discord.Embed(title="🔋 Offerta Free Agent", color=0x4444FF)
     embed.add_field(name="GM", value=interaction.user.mention)
     embed.add_field(name="Giocatore", value=giocatore)
     embed.add_field(name="Offerta", value=offerta)
     embed.add_field(name="Durata", value=f"{anni} anni")
     embed.add_field(name="Motivazione", value=motivazione)
-    
+
     await admin_ch.send(embed=embed)
     await interaction.response.send_message(f"Offerta per **{giocatore}** registrata. Attendi la valutazione degli admin.", ephemeral=True)
 
@@ -231,14 +258,14 @@ async def firma_fa(interaction: discord.Interaction, giocatore: str, offerta: st
 async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocatori_dati: str, giocatori_ricevuti: str, stipendio_ceduto: float, stipendio_ricevuto: float):
     await interaction.response.defer(ephemeral=True)
     data = await fetch_sheet_data()
-    
+
     k1, info1 = find_team_in_data(interaction.channel.name.replace("-", " "), data)
     k2, info2 = find_team_in_data(squadra_ricevente, data)
-    
+
     if not info2:
         await interaction.followup.send("Squadra ricevente non trovata.")
         return
-    
+
     if not info1:
         await interaction.followup.send("Impossibile determinare la tua squadra dal canale attuale.")
         return
@@ -253,7 +280,7 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
         return round(total, 2)
 
     sal1 = get_sal_total(info1)
-    
+
     error = None
     if sal1 > HARD_CAP:
         if stipendio_ricevuto > stipendio_ceduto:
@@ -261,42 +288,63 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
     elif sal1 > SAL_CAP:
         if stipendio_ricevuto > (stipendio_ceduto * 1.3):
             error = f"Sei sopra il Salary Cap (${sal1}M). Il ricevuto (${stipendio_ricevuto}M) supera il 130% del ceduto (${round(stipendio_ceduto*1.3,1)}M)."
-    
+
     if error:
         await interaction.followup.send(f"⚠️ **Violazione Salary Cap:** {error}")
         return
-    
+
     admin_ch = discord.utils.get(interaction.guild.text_channels, name=ADMIN_CHANNEL_NAME)
     if not admin_ch:
         await interaction.followup.send("Canale admin non trovato.")
         return
-    
+
     embed = discord.Embed(title="🤝 Proposta di Trade", color=0xFFFF00)
     embed.add_field(name="GM Proponente", value=interaction.user.mention)
     embed.add_field(name="Squadra Ricevente", value=k2)
     embed.add_field(name="Cede", value=f"{giocatori_dati} (${stipendio_ceduto}M)")
     embed.add_field(name="Riceve", value=f"{giocatori_ricevuti} (${stipendio_ricevuto}M)")
-    
+
     class TradeView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
-        
+
         @discord.ui.button(label="Accetta", style=discord.ButtonStyle.green)
         async def accept(self, b_int, button):
             mercato_ch = discord.utils.get(b_int.guild.text_channels, name=MERCATO_CHANNEL_NAME)
             if mercato_ch:
-                res_embed = discord.Embed(title="✅ TRADE UFFICIALE", color=0x00FF00, description=f"Lo scambio tra **{k1}** e **{k2}** è stato approvato!")
-                res_embed.add_field(name="Dettagli", value=f"Dati: {giocatori_dati} Ricevuti: {giocatori_ricevuti}")
+                res_embed = discord.Embed(
+                    title="✅ TRADE UFFICIALE",
+                    color=0x00FF00,
+                    description=f"Lo scambio tra **{k1}** e **{k2}** è stato approvato!"
+                )
+                res_embed.add_field(
+                    name="Dettagli",
+                    value=f"Dati: {giocatori_dati} Ricevuti: {giocatori_ricevuti}"
+                )
                 await mercato_ch.send(embed=res_embed)
                 await b_int.response.send_message("Trade approvata e postata in mercato.")
             self.stop()
-        
+
         @discord.ui.button(label="Rifiuta", style=discord.ButtonStyle.red)
         async def deny(self, b_int, button):
             await b_int.response.send_message("Trade rifiutata.")
             self.stop()
-    
+
     await admin_ch.send(embed=embed, view=TradeView())
     await interaction.followup.send("Proposta di trade inviata agli admin!")
+
+@bot.tree.command(name="update_free_agent", description="Aggiorna la lista dei free agent nel canale dedicato")
+async def update_free_agent(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    agents = get_free_agents_from_sheet()
+    text = format_free_agents_message(agents)
+
+    channel = interaction.guild.get_channel(FREE_AGENT_CHANNEL_ID)
+    if channel is None:
+        await interaction.followup.send("Canale free agent non trovato (controlla l'ID).")
+        return
+
+    await channel.send(text)
+    await interaction.followup.send("Lista free agent postata nel canale free agent.")
 
 bot.run(os.getenv("DISCORD_TOKEN"))
