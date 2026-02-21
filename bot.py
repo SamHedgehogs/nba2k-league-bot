@@ -161,14 +161,28 @@ def create_roster_embed(team_key, team_info):
 # ---- FREE AGENT ----
 
 def get_free_agents_from_sheet():
-    data = _fetch_sync()
-    # Assumiamo che Apps Script metta i free agent sotto la chiave "FREE AGENT"
-    fa_info = data.get("FREE AGENT", {})
-    players = fa_info.get("roster", [])
+    """
+    Legge direttamente il foglio 'free agent' (gid=1166834922),
+    colonna A = nome, colonna B = OVR.
+    """
+    req = urllib.request.Request(
+        "https://docs.google.com/spreadsheets/d/1R3LMmv4Zsbyq5ryHEtAYmEQjiPuCzxZKzBzyrWmuic8/export?format=tsv&gid=1166834922",
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        tsv = resp.read().decode("utf-8")
+
+    lines = [r for r in tsv.split("\n") if r.strip()]
     agents = []
-    for p in players:
-        name = p.get("nome") or p.get("giocatore") or "???"
-        ovr = p.get("overall")
+    # saltiamo la prima riga (intestazioni)
+    for row in lines[1:]:
+        parts = row.split("\t")
+        if len(parts) < 2:
+            continue
+        name = parts[0].strip()
+        ovr = parts[1].strip()
+        if not name:
+            continue
         agents.append((name, ovr))
     return agents
 
@@ -177,7 +191,7 @@ def format_free_agents_message(agents):
         return "Nessun free agent disponibile al momento."
     lines = ["**FREE AGENT**\n"]
     for name, ovr in agents:
-        ovr_txt = ovr if ovr is not None else "N/A"
+        ovr_txt = ovr if ovr not in (None, "", "0") else "N/A"
         lines.append(f"- {name} ({ovr_txt})")
     return "\n".join(lines)
 
