@@ -269,19 +269,27 @@ async def firma_fa(interaction: discord.Interaction, giocatore: str, offerta: st
     await interaction.response.send_message(f"Offerta per **{giocatore}** registrata. Attendi la valutazione degli admin.", ephemeral=True)
 
 @bot.tree.command(name="trade", description="Proponi una trade")
-async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocatori_dati: str, giocatori_ricevuti: str, stipendio_ceduto: float, stipendio_ricevuto: float):
+async def trade(
+    interaction: discord.Interaction,
+    squadra_1: str,
+    squadra_2: str,
+    dettagli_squadra_1: str,
+    dettagli_squadra_2: str,
+):
+    """
+    squadra_1: nome della tua squadra
+    squadra_2: nome dell'altra squadra
+    dettagli_squadra_1: giocatori + pick che DA squadra_1
+    dettagli_squadra_2: giocatori + pick che DA squadra_2
+    """
     await interaction.response.defer(ephemeral=True)
     data = await fetch_sheet_data()
 
-    k1, info1 = find_team_in_data(interaction.channel.name.replace("-", " "), data)
-    k2, info2 = find_team_in_data(squadra_ricevente, data)
+    k1, info1 = find_team_in_data(squadra_1, data)
+    k2, info2 = find_team_in_data(squadra_2, data)
 
-    if not info2:
-        await interaction.followup.send("Squadra ricevente non trovata.")
-        return
-
-    if not info1:
-        await interaction.followup.send("Impossibile determinare la tua squadra dal canale attuale.")
+    if not info1 or not info2:
+        await interaction.followup.send("Una delle due squadre non è stata trovata.")
         return
 
     def get_sal_total(info):
@@ -294,18 +302,17 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
         return round(total, 2)
 
     sal1 = get_sal_total(info1)
+    sal2 = get_sal_total(info2)
 
-    error = None
-    if sal1 > HARD_CAP:
-        if stipendio_ricevuto > stipendio_ceduto:
-            error = f"Sei sopra l'Hard Cap (${sal1}M). Non puoi aumentare il monte ingaggi."
-    elif sal1 > SAL_CAP:
-        if stipendio_ricevuto > (stipendio_ceduto * 1.3):
-            error = f"Sei sopra il Salary Cap (${sal1}M). Il ricevuto (${stipendio_ricevuto}M) supera il 130% del ceduto (${round(stipendio_ceduto*1.3,1)}M)."
-
-    if error:
-        await interaction.followup.send(f"⚠️ **Violazione Salary Cap:** {error}")
-        return
+    def cap_status(sal):
+        if sal > HARD_CAP:
+            return f"🔴 Sopra HARD CAP (${sal}M)"
+        elif sal > SAL_CAP:
+            return f"🟡 Tra SALARY e HARD CAP (${sal}M)"
+        elif sal >= MIN_CAP:
+            return f"🟢 Tra MINIMUM e SALARY CAP (${sal}M)"
+        else:
+            return f"🔵 Sotto MINIMUM CAP (${sal}M)"
 
     admin_ch = discord.utils.get(interaction.guild.text_channels, name=ADMIN_CHANNEL_NAME)
     if not admin_ch:
@@ -313,10 +320,12 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
         return
 
     embed = discord.Embed(title="🤝 Proposta di Trade", color=0xFFFF00)
-    embed.add_field(name="GM Proponente", value=interaction.user.mention)
-    embed.add_field(name="Squadra Ricevente", value=k2)
-    embed.add_field(name="Cede", value=f"{giocatori_dati} (${stipendio_ceduto}M)")
-    embed.add_field(name="Riceve", value=f"{giocatori_ricevuti} (${stipendio_ricevuto}M)")
+
+    embed.add_field(name="Squadra 1", value=f"**{k1}**\n{cap_status(sal1)}", inline=False)
+    embed.add_field(name="Squadra 2", value=f"**{k2}**\n{cap_status(sal2)}", inline=False)
+
+    embed.add_field(name="Giocatori + pick da Squadra 1", value=dettagli_squadra_1, inline=False)
+    embed.add_field(name="Giocatori + pick da Squadra 2", value=dettagli_squadra_2, inline=False)
 
     class TradeView(discord.ui.View):
         def __init__(self):
@@ -329,11 +338,17 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
                 res_embed = discord.Embed(
                     title="✅ TRADE UFFICIALE",
                     color=0x00FF00,
-                    description=f"Lo scambio tra **{k1}** e **{k2}** è stato approvato!"
+                    description=f"Scambio tra **{k1}** e **{k2}** approvato!"
                 )
                 res_embed.add_field(
-                    name="Dettagli",
-                    value=f"Dati: {giocatori_dati} Ricevuti: {giocatori_ricevuti}"
+                    name="Dettagli Squadra 1",
+                    value=dettagli_squadra_1,
+                    inline=False
+                )
+                res_embed.add_field(
+                    name="Dettagli Squadra 2",
+                    value=dettagli_squadra_2,
+                    inline=False
                 )
                 await mercato_ch.send(embed=res_embed)
                 await b_int.response.send_message("Trade approvata e postata in mercato.")
@@ -346,6 +361,7 @@ async def trade(interaction: discord.Interaction, squadra_ricevente: str, giocat
 
     await admin_ch.send(embed=embed, view=TradeView())
     await interaction.followup.send("Proposta di trade inviata agli admin!")
+
 
 @bot.tree.command(name="update_free_agent", description="Aggiorna la lista dei free agent nel canale dedicato")
 async def update_free_agent(interaction: discord.Interaction):
